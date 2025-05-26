@@ -25,11 +25,8 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
 
     public CS2RockTheVoteManager(CS2RockTheVote _plugin, ILogger<CS2RockTheVoteManager> _logger) 
     {
-        Logger = _logger;
-        _plugin.RegisterAllAttributes(this);
-        
+        Logger = _logger;        
         ReloadActiveMapsList(Path.Combine(_plugin.ModulePath, "../maplist.txt"));
-
     }
     
     [ConsoleCommand("css_currentmap")]
@@ -49,9 +46,9 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
 
     public void ReloadActiveMapsList(string filePath)
     {
-        CachedWorkshopMaps.Clear();
         ActiveCacheTasks.ForEach((task) => task.Dispose());
         ActiveCacheTasks.Clear();
+        CachedWorkshopMaps.Clear();
         
         IEnumerable<string> lines;
         try 
@@ -70,10 +67,10 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
             try 
             {
                 workshopID = Convert.ToUInt64(args[0]);
-            } catch (Exception ex)
+            } catch (Exception)
             {
                 Logger.LogCritical($"Invalid workshopID in maplist: {args[0]}. Refer to the example maplist.txt for correct file format.");
-                break;
+                continue;
             }
             if (args.Length == 1) // length 1, workshop id and no description
             {

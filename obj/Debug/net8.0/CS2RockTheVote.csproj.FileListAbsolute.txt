@@ -10,3 +10,4 @@ C:\Users\lijsc\Desktop\CS2RockTheVote\obj\Debug\net8.0\CS2RockTheVote.dll
 C:\Users\lijsc\Desktop\CS2RockTheVote\obj\Debug\net8.0\refint\CS2RockTheVote.dll
 C:\Users\lijsc\Desktop\CS2RockTheVote\obj\Debug\net8.0\CS2RockTheVote.pdb
 C:\Users\lijsc\Desktop\CS2RockTheVote\obj\Debug\net8.0\ref\CS2RockTheVote.dll
+C:\Users\lijsc\Desktop\CS2RockTheVote\obj\Debug\net8.0\CS2RockTheVote.sourcelink.json

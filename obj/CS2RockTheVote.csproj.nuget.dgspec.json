@@ -51,13 +51,17 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "dependencies": {
+            "CS2ScreenMenuAPI": {
+              "target": "Package",
+              "version": "[3.0.5, )"
+            },
             "CounterStrikeSharp.API": {
               "target": "Package",
               "version": "[1.0.318, )"
             },
             "HtmlAgilityPack": {
               "target": "Package",
-              "version": "[1.12.1, )"
+              "version": "[1.6.13, )"
             }
           },
           "imports": [

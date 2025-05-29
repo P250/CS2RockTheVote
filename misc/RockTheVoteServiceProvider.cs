@@ -10,6 +10,7 @@ public class RockTheVoteServiceProvider : IPluginServiceCollection<CS2RockTheVot
 {
     public void ConfigureServices(IServiceCollection service)
     {
+        service.AddSingleton<ICS2MapCache, MapCacheManager>();
         service.AddSingleton<ICS2MapCooldown, MapCooldownManager>();
         service.AddSingleton<ICS2MapNominate, MapNominateManager>();
         service.AddSingleton<ICS2RockTheVote, CS2RockTheVoteManager>();

@@ -11,17 +11,6 @@ public readonly struct WorkshopMap(ulong _mapID, string _actualMapName, string? 
 
 public interface ICS2RockTheVote 
 {
-
     void ChangeMap(ulong workshopID);
-    
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="filePath">Should be in the plugin folder...</param>
-    void ReloadActiveMapsList(string filePath);
-    
-    // Does partial matches and gets as many as possible
-    IEnumerable<WorkshopMap> GetMapsFromName(string mapName);
-    WorkshopMap? GetMapFromWorkshopID(ulong workshopID);
-    
+    void UpdateRTVThreshold();
 }

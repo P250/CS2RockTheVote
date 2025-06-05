@@ -1,4 +1,5 @@
-﻿using CounterStrikeSharp.API.Core;
+﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API.Core;
 using CS2RockTheVote.API;
 using CS2RockTheVote.managers;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,7 @@ public class CS2RockTheVote(IServiceProvider _provider) : BasePlugin
     public override void Load(bool hotReload)
     {
         //RegisterAllAttributes((CS2RockTheVoteManager) _service.GetService(typeof(ICS2RockTheVote))!);
-        RegisterAllAttributes(_provider.CreateScope().ServiceProvider.GetService<ICS2RockTheVote>()!);
+        RegisterAllAttributes(_provider.CreateScope().ServiceProvider.GetService<ICS2RockTheVote>()!);  
     }
     
     public override void Unload(bool hotReload)

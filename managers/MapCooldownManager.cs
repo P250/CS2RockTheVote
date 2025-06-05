@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
@@ -11,16 +12,18 @@ namespace CS2RockTheVote.managers;
 public class MapCooldownManager : ICS2MapCooldown
 {
 
-    // key: workshopID, value: rounds on cooldown
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
     private delegate nint GetAddonNameDelegate(nint self);
-    
+
+
+    // key: workshopID, value: rounds on cooldown
+    private static readonly ulong WHITELISTED_ADDON = 3457835230;
     private Dictionary<ulong, uint> MapsOnCooldown = new();
-    private MapCacheManager CacheManager;
+    private ICS2MapCache CacheManager;
     private INetworkServerService NetworkServerService = new();
     private WorkshopMap? CurrentLoadedMap = null;
     
-    public MapCooldownManager(CS2RockTheVote _plugin, MapCacheManager _cacheManager, ILogger<CS2RockTheVoteManager> _logger) 
+    public MapCooldownManager(CS2RockTheVote _plugin, ICS2MapCache _cacheManager, ILogger<CS2RockTheVoteManager> _logger) 
     {
         CacheManager = _cacheManager;
         _plugin.RegisterListener<Listeners.OnMapStart>((mapName) =>
@@ -28,17 +31,42 @@ public class MapCooldownManager : ICS2MapCooldown
             Server.NextWorldUpdate(() =>
             {
                 var addonIds = GetCurrentMountedAddons()?.Split(",");
+                if (addonIds == null)
+                {
+                    _logger.LogCritical("Addon IDS are somehow null... Maybe need an updated vfunc offset?");
+                    return;
+                }
+                _logger.LogWarning("BROOOO WE CHANGED MAP!");
+                foreach (string addon in addonIds) 
+                {
+                    _logger.LogInformation("addon id: " + addon);
+                }
                 if (addonIds == null) { return; }
                 
-                foreach (var addonId in addonIds) 
+                foreach (var addonId in addonIds)
                 {
                     try 
                     {
                         ulong workshopId = Convert.ToUInt64(addonId);
+                        if (workshopId == WHITELISTED_ADDON) { _logger.LogWarning("We skipped yappershq addom"); continue; } // we don't wanna track this one..
+                        
+                        // decrement all maps on cooldown by one, except the current loaded map
+                        foreach (var kv in MapsOnCooldown.Where(kv => kv.Key != workshopId)) 
+                        {
+                            MapsOnCooldown[kv.Key] = kv.Value - 1;
+                            if (MapsOnCooldown[kv.Key] == 0) 
+                            {
+                                MapsOnCooldown.Remove(kv.Key);
+                            }
+                        }
+                        
                         WorkshopMap? map = CacheManager.GetMapFromWorkshopID(workshopId);
                         if (map != null) 
                         {
                             CurrentLoadedMap = map;
+                            _logger.LogWarning($"we added {map.Value.ActualMapName} as currentloadedmap");
+                            MapsOnCooldown.Add(map!.Value!.MapID, 5); // this will actually be 4 maps
+                            _logger.LogWarning("" + MapsOnCooldown.ContainsKey(map.Value.MapID));
                             break;
                         }
                     } catch (Exception) 
@@ -80,7 +108,7 @@ public class MapCooldownManager : ICS2MapCooldown
         return Marshal.PtrToStringAnsi(pAddonName);
     }
     
-    private string? GetCurrentMountedMapName() 
+    private string? GetCurrentMountedMapName()
     {
         nint pInterface = NetworkServerService.GetIGameServer();
         nint pVtable = Marshal.ReadIntPtr(pInterface);
@@ -90,6 +118,11 @@ public class MapCooldownManager : ICS2MapCooldown
         nint pAddonName = vfunc(pInterface);
         
         return Marshal.PtrToStringAnsi(pAddonName);
+    }
+    
+    public Dictionary<ulong, uint> GetMapsOnCooldown() 
+    {
+        return this.MapsOnCooldown;
     }
     
 }

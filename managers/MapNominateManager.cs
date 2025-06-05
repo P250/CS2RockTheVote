@@ -14,18 +14,16 @@ public class MapNominateManager : ICS2MapNominate
     private readonly CS2RockTheVote Plugin;
     private readonly ICS2MapCooldown CooldownManager;
     private readonly ICS2MapCache MapCacheManager;
-    private readonly ICS2NextMapVote NextMapVote;
     private uint RoundsPlayed = 0;
     private static readonly uint MAX_ROUNDS = 10;
     private static bool StartNextMapVote = false;
     private static readonly Random RANDOM = new();
 
-    public MapNominateManager(CS2RockTheVote _plugin, ICS2NextMapVote _nextMapVote, ICS2MapCooldown _cooldownManager, ICS2MapCache _mapCacheManager) 
+    public MapNominateManager(CS2RockTheVote _plugin, ICS2MapCooldown _cooldownManager, ICS2MapCache _mapCacheManager) 
     {
         Plugin = _plugin;
         CooldownManager = _cooldownManager;
         MapCacheManager = _mapCacheManager;
-        NextMapVote = _nextMapVote;
         
         // Reset state on map change
         _plugin.RegisterListener<Listeners.OnMapStart>((mapName) =>
@@ -39,20 +37,19 @@ public class MapNominateManager : ICS2MapNominate
     [GameEventHandler]
     public HookResult OnRoundEnd(EventRoundEnd @event, GameEventInfo info) 
     {
-        RoundsPlayed++;
+        /**RoundsPlayed++;
         if (!NextMapVote.IsNextMapVoteActive() && RoundsPlayed >= MAX_ROUNDS - 3)
         {
             StartNextMapVote = true;
             // start change map vote, and respect which maps r on cooldown
             NextMapVote.StartNextMapVote();
-        }
+        }**/
         return HookResult.Continue;
     }
 
     public void AddNomination(CCSPlayerController player, WorkshopMap map)
     {
         PlayerMapVotes[player.SteamID] = map;
-        // todo we want to return true if they already had a nomination.
     }
 
     //  

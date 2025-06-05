@@ -12,5 +12,4 @@ public readonly struct WorkshopMap(ulong _mapID, string _actualMapName, string? 
 public interface ICS2RockTheVote 
 {
     void ChangeMap(ulong workshopID);
-    void UpdateRTVThreshold();
 }

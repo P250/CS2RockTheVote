@@ -7,7 +7,7 @@ namespace CS2RockTheVote.managers;
 public class MapCacheManager : ICS2MapCache
 {
     private readonly List<WorkshopMap> CachedWorkshopMaps;
-    private readonly List<Task> ActiveCacheTasks;
+    private readonly List<CancellationTokenSource> ActiveCacheTasks;
     private readonly CS2RockTheVote Plugin;
     private readonly ILogger<MapCacheManager> Logger;
     
@@ -21,7 +21,7 @@ public class MapCacheManager : ICS2MapCache
 
     public void ReloadActiveMapsList(string filePath) 
     {
-        ActiveCacheTasks.ForEach((task) => task.Dispose());
+        ActiveCacheTasks.ForEach(ct => ct.Cancel());
         ActiveCacheTasks.Clear();
         CachedWorkshopMaps.Clear();
         
@@ -49,16 +49,25 @@ public class MapCacheManager : ICS2MapCache
                 continue;
             }
 
-            ActiveCacheTasks.Add(Task.Run(async () =>
+            var cancellationTokenSource = new CancellationTokenSource();
+            var ct = cancellationTokenSource.Token;
+
+            Task.Run(async () =>
             {
                 string? mapName = await GetMapNameFromID(workshopID);
-                Logger.LogWarning("map name: " + mapName);
-                Logger.LogWarning($"workshopID : {workshopID}");
+                if (mapName == null) 
+                {
+                    Logger.LogCritical($"Could not fetch map name for workshop ID {workshopID}");
+                    return;
+                }
+                if (ct.IsCancellationRequested) 
+                {
+                    return;
+                }
                 CachedWorkshopMaps.Add(new(workshopID, mapName));
-            }));
+            }, ct);
 
-            //Task.WaitAll(ActiveCacheTasks.ToArray());
-            //Logger.LogWarning("tasks ended...");
+            ActiveCacheTasks.Add(cancellationTokenSource);
             
         }
     }

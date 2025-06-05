@@ -1,114 +1,235 @@
-using System.Diagnostics.SymbolStore;
+using System.Runtime.InteropServices;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Utils;
 using CS2RockTheVote.API;
-using HtmlAgilityPack;
+using CS2RockTheVote.misc;
+using CS2ScreenMenuAPI;
 using Microsoft.Extensions.Logging;
 
 namespace CS2RockTheVote.managers;
 
-public readonly struct WorkshopMap(ulong _mapID, string _actualMapName, string? _description = null)
-{
-    public ulong MapID { get; init; } = _mapID;
-    public string ActualMapName { get; init; } = _actualMapName;
-    public string? Description { get; init; } = _description;
-}
-
 public class CS2RockTheVoteManager : ICS2RockTheVote
 {
-
-    private readonly List<WorkshopMap> CachedWorkshopMaps = new();
-    private readonly List<Task> ActiveCacheTasks = new();
+    private readonly BasePlugin Plugin;
+    private readonly ICS2MapCooldown CooldownManager;
+    private readonly ICS2MapNominate NominateManager;
+    private readonly ICS2MapCache MapCacheManager;
     private readonly ILogger<CS2RockTheVoteManager> Logger;
+    private List<CCSPlayerController> PlayersWhoRTVd = new();
+    private List<CancellationTokenSource> ActiveToggleCanRTVCancellationTokens = new();
+    private uint RTVThreshold = 0;
+    private bool CanRTV = false;
 
-    public CS2RockTheVoteManager(CS2RockTheVote _plugin, ILogger<CS2RockTheVoteManager> _logger) 
+    public CS2RockTheVoteManager(CS2RockTheVote _plugin, ICS2MapCooldown _cooldownManager, ICS2MapNominate _nominateManager, ICS2MapCache _mapCacheManager, ILogger<CS2RockTheVoteManager> _logger) 
     {
+        Plugin = _plugin;
         Logger = _logger;
-        _plugin.RegisterAllAttributes(this);
-        
-        ReloadActiveMapsList(Path.Combine(_plugin.ModulePath, "../maplist.txt"));
+        CooldownManager = _cooldownManager;
+        NominateManager = _nominateManager;
+        MapCacheManager = _mapCacheManager;
+        MapCacheManager.ReloadActiveMapsList(Path.Combine(_plugin.ModulePath, "../maplist.txt"));
 
+        // This is to stop people RTVing immediately after a new map loads.
+        _plugin.RegisterListener<Listeners.OnMapStart>((_) =>
+        {
+            ActiveToggleCanRTVCancellationTokens.ForEach(ct => ct.Cancel());
+            CanRTV = false;
+
+            var cancellationTokenSource = new CancellationTokenSource();
+            var ct = cancellationTokenSource.Token;
+    
+            // Todo change convar `sv_hibernate_when_empty` to false and use _plugin.AddTimer
+            Task.Run(async () =>
+            {
+                Logger.LogWarning("bro we got into the task timer...!");
+                await Task.Delay(15 * 1000);
+                Logger.LogWarning("ok 15s has passed");
+                if (ct.IsCancellationRequested)
+                {
+                    Logger.LogWarning("Shit, cancellation was requested mate, sorry.");
+                    return;
+                }
+                CanRTV = true;
+            }, ct);
+            
+            ActiveToggleCanRTVCancellationTokens.Add(cancellationTokenSource);
+            
+        });
+        
+    }
+  
+    [ConsoleCommand("css_rtv")]
+    public void OnPlayerRTV(CCSPlayerController? player, CommandInfo info) 
+    {
+        if (player == null || !CanRTV) { Logger.LogWarning($"Yo my g, CanRTV is {CanRTV} right now."); return; }
+        
+        PlayersWhoRTVd.Add(player);
+        if (PlayersWhoRTVd.Count >= RTVThreshold)
+        {
+            PlayersWhoRTVd.Clear();
+            CanRTV = false;
+            StartNextMapVote();
+        }
+        else
+        {
+            Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has rocked the vote. ({ChatColors.Green}{PlayersWhoRTVd.Count}{ChatColors.Default}/{ChatColors.Green}{RTVThreshold}){ChatColors.Default}.");
+        }
+        
     }
     
-    [ConsoleCommand("css_currentmap")]
-    public void OnCurrentMapCommand(CCSPlayerController? player, CommandInfo info) 
+    [ConsoleCommand("css_test")]
+    [ConsoleCommand("test")]
+    public void OnTEst(CCSPlayerController? player, CommandInfo info) 
     {
-        //info.ReplyToCommand($"Current map: {Server.MapName}");
-        foreach (var map in CachedWorkshopMaps) 
+        info.ReplyToCommand("Current maps on cooldown:");
+        foreach (var kv in CooldownManager.GetMapsOnCooldown()) 
         {
-            Console.WriteLine($"ID: {map.MapID} Name: {map.ActualMapName} Desc: {map.Description}");
+            info.ReplyToCommand($"map: {kv.Key} | on cooldown: {kv.Value}");
         }
+        /**
+        * TODO:
+        Check if RTV works, setup that shit
+        Check if nominate works, setup that shit also
+        menus for everything
+        then we are done.
+        *
+        **/
     }
-
-    public void ChangeMap(long workshopID)
+    
+    
+    [ConsoleCommand("css_nominate")]
+    public void OnNominate(CCSPlayerController? player, CommandInfo info) 
     {
+        if (player == null) { return; }
         
-    }
-
-    public void ReloadActiveMapsList(string filePath)
-    {
-        CachedWorkshopMaps.Clear();
-        ActiveCacheTasks.ForEach((task) => task.Dispose());
-        ActiveCacheTasks.Clear();
+        var mainMenu = new Menu(player, Plugin)
+        {
+            Title = "Nominate a map",
+            ShowDisabledOptionNum = true,
+            HasExitButon = true,
+            PostSelect = PostSelect.Reset,
+            ShowPageCount = true
+        };
         
-        IEnumerable<string> lines;
-        try 
+        var subMenu = new Menu(player, Plugin)
         {
-            lines = File.ReadLines(filePath);
-        } catch (Exception ex) 
+            Title = "", // to set later
+            HasExitButon = true,
+            IsSubMenu = true,
+            PrevMenu = mainMenu
+        };
+        
+        if (info.ArgCount > 1) 
         {
-            Logger.LogCritical(ex.Message);
-            Logger.LogCritical($"Could not open maplist file with path: {filePath}");
+            string nominatedMapName = info.GetArg(2);
+            var mapsFromName = MapCacheManager.GetMapsFromName(nominatedMapName);
+            if (mapsFromName == null) 
+            {
+                // todo print no map found  
+                 
+            } else if (mapsFromName.Count() == 0) 
+            {
+                // todo print no map found
+                
+            } else if (mapsFromName.Count() > 1) 
+            {
+                // todo show menu with maps that were found.
+                foreach (var map in mapsFromName) 
+                {
+                    mainMenu.AddItem($"{map.ActualMapName}", (p, option) =>
+                    {
+                        //subMenu.AddItem($"{map.Description}", (p, option) => { });
+                        //subMenu.Display();
+                        // todo show description then an option to vote it or to go back to where you were
+                        //p.PrintToChat($"U just clicked on {map.ActualMapName}");
+                    });                   
+                }
+            }
             return;
         }
-        foreach (string line in lines) 
+        
+        /**
+        * Todo:
+        1. Show menu with all maps that are cached
+        2. Gray out the maps which r on cooldown
+        3. Allow user to check descriptions for each map
+        4. Show cooldown time left for map
+        **/
+             
+        foreach (var map in MapCacheManager.GetCachedWorkshopMaps()) 
         {
-            ulong workshopID;
-            string[] args = line.Split(':');
-            try 
+            // i.e. if there is no cooldown
+            if (CooldownManager.GetCooldownInfo(map.MapID) == 0)
             {
-                workshopID = Convert.ToUInt64(args[0]);
-            } catch (Exception ex)
-            {
-                Logger.LogCritical($"Invalid workshopID in maplist: {args[0]}. Refer to the example maplist.txt for correct file format.");
-                break;
-            }
-            if (args.Length == 1) // length 1, workshop id and no description
-            {
-                // If it's a comment we ignore that line.
-                if (args[0].StartsWith("//")) { continue; }
-                //CachedWorkshopMaps.Add(new(workshopID, GetActualMapName(workshopID).Result));
-                ActiveCacheTasks.Add(Task.Run(async () =>
+                mainMenu.AddItem($"{map.ActualMapName}", (p, option) =>
                 {
-                    string? mapName = await GetMapNameFromID(workshopID);
-                    CachedWorkshopMaps.Add(new(workshopID, (mapName == null) ? "unk" : mapName));
-                }));
-            }
-            else if (args.Length == 2) // length 2, workshop id AND description
+                    player.PrintToChat("U JUST CLICKED " + map.ActualMapName);
+                    // todo show description then an option to vote it or to go back to where you were
+                });
+            } else 
             {
-                //CachedWorkshopMaps.Add(new(workshopID, GetActualMapName(workshopID).Result, args[1]));
-                ActiveCacheTasks.Add(Task.Run(async () =>
-                {
-                    string? mapName = await GetMapNameFromID(workshopID);
-                    CachedWorkshopMaps.Add(new(workshopID, (mapName == null) ? "unk" : mapName, args[1]));
-                }));
+                mainMenu.AddItem($"{map.ActualMapName}", (p, option) => { }, true);
             }
         }
+
+        mainMenu.Display();
+        
     }
     
-    private async Task<string?> GetMapNameFromID(ulong workshopID) 
+    [GameEventHandler]
+    public HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info) 
     {
+        // Every time somebody joins or leaves the team, we calculate the number of actively playing players, i.e. on T or CT team
+        int activeOnlinePlayers = Utilities.GetPlayers().Where(pl => pl.Team != CsTeam.None || (pl.Team & CsTeam.Spectator) == 0).Count();
+        RTVThreshold = activeOnlinePlayers switch
+        {   
+            (1) => 1, // TODO: remove, this is for debug for local testing
+            (<= 3) => 2, // to ensure that when 1 player is online they can't just change it to any shitty map
+            _ => (uint)(activeOnlinePlayers * (2/3f))
+        };
+        
+        // If player left, try remove them from players who RTV'd
+        if (@event.Disconnect) 
+        {
+            if (@event.Userid != null) 
+            {
+                PlayersWhoRTVd.Remove(@event.Userid);
+            }
+            return HookResult.Continue;
+        }
 
-        using HttpClient client = new();
-        var htmlBody = await client.GetStringAsync($"https://steamcommunity.com/sharedfiles/filedetails/?id={workshopID}");
-
-        HtmlDocument document = new HtmlDocument();
-        document.LoadHtml(htmlBody);
-
-        return document.DocumentNode.SelectSingleNode("//div[contains(@class, 'workshopItemTitle')]")?.InnerText;
-
-    } 
-    
+        // Same case if players moves onto a non-playing team. 
+        CsTeam switchedTeam = (CsTeam) @event.Team;
+        if ( switchedTeam == CsTeam.None || (switchedTeam & CsTeam.Spectator) != 0) 
+        {
+            if (@event.Userid != null) 
+            {
+                PlayersWhoRTVd.Remove(@event.Userid);
+            }
+            return HookResult.Continue;
+        }
+        
+        if (PlayersWhoRTVd.Count() >= RTVThreshold) 
+        {
+            PlayersWhoRTVd.Clear();
+            CanRTV = false;
+            StartNextMapVote();
+        }
+        
+        return HookResult.Continue;
+    }
+ 
+    private void StartNextMapVote() 
+    {
+        Logger.LogCritical("YAYYYYYY ASLJDJLASDKJLAS WE STARTED THE NEXT MAP VOTE MATE.");
+    }
+ 
+    public void ChangeMap(ulong workshopID) 
+    {
+        return;
+    }
+      
 }

@@ -1,9 +1,8 @@
-using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
+using CounterStrikeSharp.API.Modules.Commands;
 using CS2RockTheVote.API;
-using CS2ScreenMenuAPI;
-
+using Microsoft.Extensions.Logging;
 namespace CS2RockTheVote.managers;
 
 public class MapNominateManager : ICS2MapNominate
@@ -14,10 +13,7 @@ public class MapNominateManager : ICS2MapNominate
     private readonly CS2RockTheVote Plugin;
     private readonly ICS2MapCooldown CooldownManager;
     private readonly ICS2MapCache MapCacheManager;
-    private uint RoundsPlayed = 0;
-    private static readonly uint MAX_ROUNDS = 10;
-    private static bool StartNextMapVote = false;
-    private static readonly Random RANDOM = new();
+    private readonly Random RANDOM = new();
 
     public MapNominateManager(CS2RockTheVote _plugin, ICS2MapCooldown _cooldownManager, ICS2MapCache _mapCacheManager) 
     {
@@ -28,56 +24,80 @@ public class MapNominateManager : ICS2MapNominate
         // Reset state on map change
         _plugin.RegisterListener<Listeners.OnMapStart>((mapName) =>
         {
-            RoundsPlayed = 0;
             PlayerMapVotes.Clear();
             MapVoteCounts.Clear();
         });
     }
     
-    [GameEventHandler]
-    public HookResult OnRoundEnd(EventRoundEnd @event, GameEventInfo info) 
+    public bool AddNomination(CCSPlayerController player, WorkshopMap map)
     {
-        /**RoundsPlayed++;
-        if (!NextMapVote.IsNextMapVoteActive() && RoundsPlayed >= MAX_ROUNDS - 3)
+
+        // First we check if they have an existing vote.
+        bool prevEntryExists = PlayerMapVotes.TryGetValue(player.SteamID, out WorkshopMap prevVotedMap);
+        if (prevEntryExists) 
         {
-            StartNextMapVote = true;
-            // start change map vote, and respect which maps r on cooldown
-            NextMapVote.StartNextMapVote();
-        }**/
-        return HookResult.Continue;
-    }
+            MapVoteCounts[prevVotedMap] -= 1;
+        }
 
-    public void AddNomination(CCSPlayerController player, WorkshopMap map)
-    {
+        // Then we set their current vote
         PlayerMapVotes[player.SteamID] = map;
+        bool noExistingVotes = MapVoteCounts.TryAdd(map, 1);
+        if (!noExistingVotes) // i.e. if there ARE existing votes... :P 
+        {
+            MapVoteCounts[map] += 1;
+        }
+
+        return prevEntryExists;
+        
     }
 
-    //  
     public IEnumerable<WorkshopMap> ConstructVotingList()
     {
         List<WorkshopMap> SortedTop6MapVotes = MapVoteCounts
-            .OrderByDescending(kv => kv.Value)
-            .Take(6)
-            .Select(kv => kv.Key)
-            .ToList();
-
+            .OrderByDescending(kv => kv.Value) // Taking the highest votes first
+            .Take(6) // If there are less than 6 it will take as many as it can
+            .Where(kv => kv.Value > 0) // Ensure we only pick maps with votes!
+            .Select(kv => kv.Key) // Then take the maps themselves only
+            .ToList(); 
 
         // todo specify max size in config and ensure we can always construct a voting list
         int size = SortedTop6MapVotes.Count;
-        if (size < 6)
+        while (size < 6) 
         {
-            while (6 - size > 0) 
-            {
-                var randomMap = MapCacheManager.GetCachedWorkshopMaps()[(int)RANDOM.NextInt64(MapCacheManager.GetCachedWorkshopMaps().Count)];
-                if (SortedTop6MapVotes.Contains(randomMap) || CooldownManager.GetCooldownInfo(randomMap.MapID) != 0) { continue; }
+            var randomMap = MapCacheManager.GetCachedWorkshopMaps()[(int)RANDOM.NextInt64(MapCacheManager.GetCachedWorkshopMaps().Count)];
+            if (SortedTop6MapVotes.Contains(randomMap) || CooldownManager.GetCooldownInfo(randomMap.MapID) != 0) { continue; }
 
-                SortedTop6MapVotes.Add(randomMap);
-                size++;
-            }
+            SortedTop6MapVotes.Add(randomMap);
+            size++;
         }
         
         return SortedTop6MapVotes;
 
+    }
+    
+    public uint GetNominationCount(WorkshopMap map) 
+    {
+        return MapVoteCounts[map];
+    }
+
+
+    // todo put into api maybe
+    private void ChangeMap() 
+    {
+        
+    }
+    
+    public void Test() 
+    {
+        foreach (var kv in PlayerMapVotes) 
+        {
+            Console.WriteLine($"{kv.Key} voted {kv.Value.ActualMapName}");
+        }
+        
+        foreach (var kv in MapVoteCounts) 
+        {
+            Console.WriteLine($"{kv.Key.ActualMapName} has {kv.Value} votes.");
+        }
     }
 
 }

@@ -15,8 +15,10 @@ public class CS2RockTheVote(IServiceProvider _provider) : BasePlugin
 
     public override void Load(bool hotReload)
     {
-        //RegisterAllAttributes((CS2RockTheVoteManager) _service.GetService(typeof(ICS2RockTheVote))!);
-        RegisterAllAttributes(_provider.CreateScope().ServiceProvider.GetService<ICS2RockTheVote>()!);  
+        RegisterAllAttributes((CS2RockTheVoteManager) _provider.GetService(typeof(ICS2RockTheVote))!);
+        RegisterAllAttributes((MapNominateManager) _provider.GetService(typeof(ICS2MapNominate))!);
+        RegisterAllAttributes((MapCacheManager) _provider.GetService(typeof(ICS2MapCache))!);
+        RegisterAllAttributes((NextMapVoteManager)_provider.GetService(typeof(ICS2NextMapVote))!);
     }
     
     public override void Unload(bool hotReload)

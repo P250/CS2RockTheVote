@@ -5,7 +5,6 @@ using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Utils;
 using CS2RockTheVote.API;
-using CS2RockTheVote.misc;
 using CS2ScreenMenuAPI;
 using Microsoft.Extensions.Logging;
 
@@ -17,19 +16,21 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
     private readonly ICS2MapCooldown CooldownManager;
     private readonly ICS2MapNominate NominateManager;
     private readonly ICS2MapCache MapCacheManager;
+    private readonly ICS2NextMapVote NextMapVoteManager;
     private readonly ILogger<CS2RockTheVoteManager> Logger;
     private List<CCSPlayerController> PlayersWhoRTVd = new();
     private List<CancellationTokenSource> ActiveToggleCanRTVCancellationTokens = new();
     private uint RTVThreshold = 0;
     private bool CanRTV = false;
 
-    public CS2RockTheVoteManager(CS2RockTheVote _plugin, ICS2MapCooldown _cooldownManager, ICS2MapNominate _nominateManager, ICS2MapCache _mapCacheManager, ILogger<CS2RockTheVoteManager> _logger) 
+    public CS2RockTheVoteManager(CS2RockTheVote _plugin, ICS2MapCooldown _cooldownManager, ICS2MapNominate _nominateManager, ICS2MapCache _mapCacheManager, ICS2NextMapVote _mapVoteManager, ILogger<CS2RockTheVoteManager> _logger) 
     {
         Plugin = _plugin;
         Logger = _logger;
         CooldownManager = _cooldownManager;
         NominateManager = _nominateManager;
         MapCacheManager = _mapCacheManager;
+        NextMapVoteManager = _mapVoteManager;
         MapCacheManager.ReloadActiveMapsList(Path.Combine(_plugin.ModulePath, "../maplist.txt"));
 
         // This is to stop people RTVing immediately after a new map loads.
@@ -41,15 +42,13 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
             var cancellationTokenSource = new CancellationTokenSource();
             var ct = cancellationTokenSource.Token;
     
-            // Todo change convar `sv_hibernate_when_empty` to false and use _plugin.AddTimer
+            // Todo maybe set convar `sv_hibernate_when_empty` to false and use _plugin.AddTimer instead of this.
             Task.Run(async () =>
             {
-                Logger.LogWarning("bro we got into the task timer...!");
-                await Task.Delay(15 * 1000);
-                Logger.LogWarning("ok 15s has passed");
+                await Task.Delay(45 * 1000);
                 if (ct.IsCancellationRequested)
                 {
-                    Logger.LogWarning("Shit, cancellation was requested mate, sorry.");
+                    Logger.LogWarning("Cancellation requested.");
                     return;
                 }
                 CanRTV = true;
@@ -60,77 +59,58 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
         });
         
     }
+    
+    [ConsoleCommand("test")]
+    public void OnTest(CCSPlayerController? player, CommandInfo info) 
+    {
+        NominateManager.Test();
+    }
+
+
   
     [ConsoleCommand("css_rtv")]
     public void OnPlayerRTV(CCSPlayerController? player, CommandInfo info) 
     {
-        if (player == null || !CanRTV) { Logger.LogWarning($"Yo my g, CanRTV is {CanRTV} right now."); return; }
+        if (player == null || !CanRTV) { player?.PrintToChat("[RTV] You can't RTV right now!"); return; }
         
         PlayersWhoRTVd.Add(player);
+        Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has rocked the vote. ({ChatColors.Green}{PlayersWhoRTVd.Count}{ChatColors.Default}/{ChatColors.Green}{RTVThreshold}{ChatColors.Default}).");
         if (PlayersWhoRTVd.Count >= RTVThreshold)
         {
             PlayersWhoRTVd.Clear();
             CanRTV = false;
-            StartNextMapVote();
+            NextMapVoteManager.StartNextMapVote();
         }
-        else
-        {
-            Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has rocked the vote. ({ChatColors.Green}{PlayersWhoRTVd.Count}{ChatColors.Default}/{ChatColors.Green}{RTVThreshold}){ChatColors.Default}.");
-        }
-        
     }
     
-    [ConsoleCommand("css_test")]
-    [ConsoleCommand("test")]
-    public void OnTEst(CCSPlayerController? player, CommandInfo info) 
-    {
-        info.ReplyToCommand("Current maps on cooldown:");
-        foreach (var kv in CooldownManager.GetMapsOnCooldown()) 
-        {
-            info.ReplyToCommand($"map: {kv.Key} | on cooldown: {kv.Value}");
-        }
-        /**
-        * TODO:
-        Check if RTV works, setup that shit
-        Check if nominate works, setup that shit also
-        menus for everything
-        then we are done.
-        *
-        **/
-    }
-    
-    
+    /// <summary>
+    /// This function opens the nominate menu and allows players to choose/switch their nomination. 
+    /// This command won't run if the `MapThatWonTheVote` variable in NextMapVoteManager.cs is NOT null (as this implies we already have a next map chosen).
+    /// This command also won't run when `CanRTV` is false.
+    /// </summary>
     [ConsoleCommand("css_nominate")]
     public void OnNominate(CCSPlayerController? player, CommandInfo info) 
     {
-        if (player == null) { return; }
+        if (player == null || !CanRTV || (NextMapVoteManager.GetMapThatWonVote() != null)) { player?.PrintToChat("[RTV] You can't nominate right now!"); return; };
         
         var mainMenu = new Menu(player, Plugin)
         {
             Title = "Nominate a map",
             ShowDisabledOptionNum = true,
             HasExitButon = true,
-            PostSelect = PostSelect.Reset,
+            PostSelect = PostSelect.Close,
             ShowPageCount = true
-        };
-        
-        var subMenu = new Menu(player, Plugin)
-        {
-            Title = "", // to set later
-            HasExitButon = true,
-            IsSubMenu = true,
-            PrevMenu = mainMenu
         };
         
         if (info.ArgCount > 1) 
         {
             string nominatedMapName = info.GetArg(2);
             var mapsFromName = MapCacheManager.GetMapsFromName(nominatedMapName);
-            if (mapsFromName == null) 
+            if (mapsFromName == null)
             {
                 // todo print no map found  
                  
-            } else if (mapsFromName.Count() == 0) 
+            } else if (mapsFromName.Count() == 0)
             {
                 // todo print no map found
                 
@@ -141,23 +121,39 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
                 {
                     mainMenu.AddItem($"{map.ActualMapName}", (p, option) =>
                     {
-                        //subMenu.AddItem($"{map.Description}", (p, option) => { });
-                        //subMenu.Display();
-                        // todo show description then an option to vote it or to go back to where you were
-                        //p.PrintToChat($"U just clicked on {map.ActualMapName}");
+                        var subMenu = new Menu(player, Plugin)
+                        {
+                            Title = "", // to set later
+                            HasExitButon = true,
+                            IsSubMenu = true,
+                            PrevMenu = mainMenu
+                        };
+                        subMenu.AddItem($"{((map.RawDescription == null) ? "This map has no description set." : map.RawDescription)}", (p, option) => { }, true);
+                        
+                        subMenu.AddItem($"", (p, option) => { }, true);
+                        subMenu.AddItem($"Nominate this map", (p, option) => 
+                        { 
+                            bool? playerHasNominated = NominateManager.AddNomination(p, map);
+                            if (playerHasNominated == null) 
+                            {
+                                Logger.LogCritical("Critical error when trying to add a nomination.");
+                                return;
+                            }
+                            uint numOfVotes = NominateManager.GetNominationCount(map);
+                            if (!playerHasNominated.Value) 
+                            {
+                                Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has nominated {ChatColors.Green}{map.ActualMapName}{ChatColors.Default}. It now has {ChatColors.Green}{numOfVotes}{ChatColors.Default} vote{((numOfVotes > 1) ? "s" : "")}.");    
+                            } else 
+                            {
+                                Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has changed their nomination to {ChatColors.Green}{map.ActualMapName}{ChatColors.Default}. It now has {ChatColors.Green}{numOfVotes}{ChatColors.Default} vote{((numOfVotes > 1) ? "s" : "")}.");    
+                            }
+                        });                
+                        subMenu.Display();  
                     });                   
                 }
             }
             return;
         }
-        
-        /**
-        * Todo:
-        1. Show menu with all maps that are cached
-        2. Gray out the maps which r on cooldown
-        3. Allow user to check descriptions for each map
-        4. Show cooldown time left for map
-        **/
              
         foreach (var map in MapCacheManager.GetCachedWorkshopMaps()) 
         {
@@ -166,8 +162,40 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
             {
                 mainMenu.AddItem($"{map.ActualMapName}", (p, option) =>
                 {
-                    player.PrintToChat("U JUST CLICKED " + map.ActualMapName);
-                    // todo show description then an option to vote it or to go back to where you were
+                    var subMenu = new Menu(player, Plugin)
+                    {
+                        Title = map.ActualMapName,
+                        HasExitButon = true,
+                        IsSubMenu = true,
+                        PrevMenu = mainMenu,
+                        PostSelect = PostSelect.Close
+                    };
+                    
+                    // Description first
+                    if (map.RawDescription == null) { subMenu.AddItem($"This map has no description set.", (p, option) => { }, true); }
+                    else 
+                    {
+                        string[] splitLines = map.RawDescription.Split("\\n");
+                        foreach (var splitLine in splitLines) 
+                        {
+                            subMenu.AddItem($"{splitLine}", (p, option) => { }, true);
+                        }
+                    }
+                    
+                    // Then add nominate option
+                    subMenu.AddItem($"", (p, option) => { }, true);
+                    subMenu.AddItem($"Nominate this map", (p, option) => 
+                    { 
+                        bool playerHasNominated = NominateManager.AddNomination(p, map);
+                        uint numOfVotes = NominateManager.GetNominationCount(map);
+                        if (!playerHasNominated)
+                        {
+                            Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has nominated {ChatColors.Green}{map.ActualMapName}{ChatColors.Default}. It now has {ChatColors.Green}{numOfVotes}{ChatColors.Default} vote{((numOfVotes > 1) ? "s" : "")}.");    
+                        } else 
+                        {
+                            Server.PrintToChatAll($"[RTV] {ChatColors.Green}{player.PlayerName}{ChatColors.Default} has changed their nomination to {ChatColors.Green}{map.ActualMapName}{ChatColors.Default}. It now has {ChatColors.Green}{numOfVotes}{ChatColors.Default} vote{((numOfVotes > 1) ? "s" : "")}.");    
+                        }
+                    });
                 });
             } else 
             {
@@ -179,6 +207,11 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
         
     }
     
+    /// <summary>
+    /// This function listnens for every time a player switches team (which can include disconnects) and updates the RTV threshold based on this. 
+    /// It also will start the next map vote if the correct conditions are met.
+    /// </summary>
+    /// <returns></returns>
     [GameEventHandler]
     public HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info) 
     {
@@ -188,48 +221,36 @@ public class CS2RockTheVoteManager : ICS2RockTheVote
         {   
             (1) => 1, // TODO: remove, this is for debug for local testing
             (<= 3) => 2, // to ensure that when 1 player is online they can't just change it to any shitty map
-            _ => (uint)(activeOnlinePlayers * (2/3f))
+            _ => (uint)(activeOnlinePlayers * (2/3f)) // seems to balance quite well
         };
         
         // If player left, try remove them from players who RTV'd
-        if (@event.Disconnect) 
+        if (@event.Disconnect)
         {
             if (@event.Userid != null) 
             {
                 PlayersWhoRTVd.Remove(@event.Userid);
             }
-            return HookResult.Continue;
         }
 
         // Same case if players moves onto a non-playing team. 
         CsTeam switchedTeam = (CsTeam) @event.Team;
-        if ( switchedTeam == CsTeam.None || (switchedTeam & CsTeam.Spectator) != 0) 
+        if ( !@event.Disconnect && (switchedTeam == CsTeam.None || (switchedTeam & CsTeam.Spectator) != 0)) 
         {
             if (@event.Userid != null) 
             {
                 PlayersWhoRTVd.Remove(@event.Userid);
             }
-            return HookResult.Continue;
-        }
+        } 
         
         if (PlayersWhoRTVd.Count() >= RTVThreshold) 
         {
             PlayersWhoRTVd.Clear();
             CanRTV = false;
-            StartNextMapVote();
+            NextMapVoteManager.StartNextMapVote();
         }
         
         return HookResult.Continue;
     }
- 
-    private void StartNextMapVote() 
-    {
-        Logger.LogCritical("YAYYYYYY ASLJDJLASDKJLAS WE STARTED THE NEXT MAP VOTE MATE.");
-    }
- 
-    public void ChangeMap(ulong workshopID) 
-    {
-        return;
-    }
-      
+     
 }

@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
@@ -14,10 +13,8 @@ public class MapCooldownManager : ICS2MapCooldown
 
     [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
     private delegate nint GetAddonNameDelegate(nint self);
-
-
-    // key: workshopID, value: rounds on cooldown
     private static readonly ulong WHITELISTED_ADDON = 3457835230;
+    // key: workshopID, value: rounds on cooldown
     private Dictionary<ulong, uint> MapsOnCooldown = new();
     private ICS2MapCache CacheManager;
     private INetworkServerService NetworkServerService = new();
@@ -48,7 +45,7 @@ public class MapCooldownManager : ICS2MapCooldown
                     try 
                     {
                         ulong workshopId = Convert.ToUInt64(addonId);
-                        if (workshopId == WHITELISTED_ADDON) { _logger.LogWarning("We skipped yappershq addom"); continue; } // we don't wanna track this one..
+                        if (workshopId == WHITELISTED_ADDON) { _logger.LogWarning("We skipped yappershq addon"); continue; } // we don't wanna track this one..
                         
                         // decrement all maps on cooldown by one, except the current loaded map
                         foreach (var kv in MapsOnCooldown.Where(kv => kv.Key != workshopId)) 
